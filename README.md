@@ -1,3 +1,4 @@
+
 # YouSpotDL - App
 
 > **Desktop GUI for downloading Spotify playlists, YouTube playlists, and content from 1000+ sites.**  

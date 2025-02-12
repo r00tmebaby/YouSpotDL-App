@@ -1,3 +1,4 @@
+
 # Normalise line endings to LF in the repo; checkout as CRLF on Windows
 * text=auto eol=lf
 
@@ -8,3 +9,6 @@
 *.zip binary
 *.exe binary
 
+# Large binaries tracked with Git LFS
+ffmpeg.exe filter=lfs diff=lfs merge=lfs -text
+dlp.exe filter=lfs diff=lfs merge=lfs -text
