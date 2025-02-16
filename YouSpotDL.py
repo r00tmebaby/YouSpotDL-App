@@ -56,6 +56,20 @@ def get_spotify_client():
     return spotipy.Spotify(auth_manager=auth_manager)
 
 
+def get_user_playlists():
+    """Fetches all playlists from a user's Spotify profile."""
+    spotify = get_spotify_client()
+    playlists = []
+    user_id = spotify.current_user()["id"]
+    results = spotify.user_playlists(user_id)
+
+    while results:
+        playlists.extend(results["items"])
+        results = spotify.next(results) if results["next"] else None
+
+    return [f'https://open.spotify.com/playlist/{pl["id"]}' for pl in playlists]
+
+
 async def fetch_playlist_songs(platform, url):
     """Fetches song list from Spotify or YouTube based on platform."""
     playlist_name = None
@@ -102,7 +116,6 @@ async def fetch_playlist_songs(platform, url):
     return playlist_name, songs
 
 
-
 async def download_song(song_name, output_folder):
     """Downloads a single song using yt-dlp."""
     command = [
@@ -139,54 +152,6 @@ async def worker(queue, output_folder, progress_bar, status):
         queue.task_done()
 
 
-async def fetch_user_playlists():
-    """Fetches all playlists from the authenticated Spotify user."""
-    spotify = get_spotify_client()
-    playlists = []
-
-    try:
-        results = spotify.current_user_playlists()
-        for playlist in results['items']:
-            playlists.append((playlist['name'], playlist['id']))
-    except spotipy.SpotifyException as e:
-        console.print(f"\n❌ [red]Error fetching user playlists: {e}[/red]")
-
-    return playlists
-async def download_all_user_playlists(download_dir):
-    """Downloads all playlists from the authenticated user."""
-    console.print("\n⏳ [yellow]Fetching all your Spotify playlists...[/yellow]")
-    playlists = await fetch_user_playlists()
-
-    if not playlists:
-        console.print("❌ [red]No playlists found![/red]")
-        return
-
-    for playlist_name, playlist_id in playlists:
-        console.print(f"\n📥 [cyan]Downloading: {playlist_name}[/cyan]")
-        playlist_url = f"https://open.spotify.com/playlist/{playlist_id}"
-        await process_playlist_download(playlist_url, playlist_name, download_dir)
-async def process_playlist_download(url, playlist_name, download_dir):
-    """Handles fetching and downloading a playlist."""
-    console.print(f"\n⏳ [yellow]Fetching playlist: {playlist_name or url}...[/yellow]")
-    playlist_name, songs = await fetch_playlist_songs("Spotify", url)
-
-    if not songs:
-        console.print(f"❌ [red]No songs found in {playlist_name}! Skipping.[/red]")
-        return
-
-    console.print(f"\n✅ [bold cyan]Playlist: {playlist_name} - Total Songs: {len(songs)}[/bold cyan]")
-
-    playlist_folder = os.path.join(download_dir, playlist_name)
-    os.makedirs(playlist_folder, exist_ok=True)
-
-    console.print("\n🚀 [bold blue]Downloading... Please wait.[/bold blue]")
-    status = await download_concurrent(playlist_name, songs, download_dir)
-
-    console.print("\n🎉 [bold green]Download Complete![/bold green]")
-    console.print(f"✅ [bold cyan]Total Songs: {status['total']}[/bold cyan]")
-    console.print(f"⬇ [bold green]Successfully Downloaded: {status['downloaded']}[/bold green]")
-    console.print(f"❌ [bold red]Errors: {status['errors']}[/bold red]")
-
 async def download_concurrent(playlist_name, songs, download_dir):
     """Downloads songs in parallel using workers with tqdm."""
     output_folder = os.path.join(download_dir, playlist_name)
@@ -211,27 +176,40 @@ async def download_concurrent(playlist_name, songs, download_dir):
     return status
 
 
-async def handle_download(platform):
-    """Handles downloading from Spotify with a submenu while preserving multiple playlist input."""
+async def handle_download(platform, urls=None):
+    """Handles playlist input and ensures each playlist gets its own folder."""
+
     download_dir = console.input("\n📂 [bold cyan]Enter download folder: [/bold cyan]").strip()
+    if urls is None:
+        urls = console.input(
+            f"\n🎵 [bold cyan]Enter {platform} Playlist URL(s) (comma-separated): [/bold cyan]"
+        ).strip().split(",")
 
-    if platform == "Spotify":
-        console.print("\n[1] 🎵 Download specific playlist(s) (manual input)")
-        console.print("[2] 📋 Download all playlists from your profile")
+    for url in urls:
+        url = url.strip()
+        if not url:
+            continue
 
-        choice = console.input("\n🎵 [bold cyan]Enter your choice: [/bold cyan]").strip()
+        console.print(f"\n⏳ [yellow]Fetching {platform} playlist...[/yellow]")
+        playlist_name, songs = await fetch_playlist_songs(platform, url)
 
-        if choice == "2":
-            await download_all_user_playlists(download_dir)
-        elif choice == "1":
-            urls = console.input(
-                f"\n🎵 [bold cyan]Enter Spotify Playlist URL(s), comma-separated: [/bold cyan]").strip().split(",")
-            for url in urls:
-                url = url.strip()
-                if url:
-                    await process_playlist_download(url, None, download_dir)
-        else:
-            console.print("❌ [red]Invalid choice. Returning to main menu.[/red]")
+        if not songs:
+            console.print(f"❌ [red]No songs found in {playlist_name}! Skipping.[/red]")
+            continue  # Skip empty playlists
+
+        console.print(f"\n✅ [bold cyan]Playlist: {playlist_name} - Total Songs: {len(songs)}[/bold cyan]")
+
+        # Ensure each playlist gets a separate folder
+        playlist_folder = os.path.join(download_dir, playlist_name)
+        os.makedirs(playlist_folder, exist_ok=True)
+
+        console.print("\n🚀 [bold blue]Downloading... Please wait.[/bold blue]")
+        status = await download_concurrent(playlist_name, songs, download_dir)
+
+        console.print("\n🎉 [bold green]Download Complete![/bold green]")
+        console.print(f"✅ [bold cyan]Total Songs: {status['total']}[/bold cyan]")
+        console.print(f"⬇ [bold green]Successfully Downloaded: {status['downloaded']}[/bold green]")
+        console.print(f"❌ [bold red]Errors: {status['errors']}[/bold red]")
 
 async def menu():
     """Main interactive menu with navigation."""
@@ -240,16 +218,19 @@ async def menu():
         console.print(Panel(BANNER, style="bold blue"))
         console.print("\n[1] 🎶 Download Spotify Playlist")
         console.print("[2] 📺 Download YouTube Playlist")
-        console.print("[3] ❌ Exit")
+        console.print("[3] 📥 Download All Playlists from Spotify Profile")
+        console.print("[4] ❌ Exit")
 
         action = console.input("\n[bold yellow]Enter choice: [/bold yellow]").strip()
-        if action == "3":
+        if action == "4":
             console.print("\n👋 [green]Exiting program. Have a great day![/green]")
             break
         elif action == "1":
             await handle_download("Spotify")
         elif action == "2":
             await handle_download("YouTube")
+        elif action == "3":
+            await handle_download("Spotify", get_user_playlists())
 
         console.input("\n🔄 [yellow]Press Enter to return to the menu...[/yellow]")
 
