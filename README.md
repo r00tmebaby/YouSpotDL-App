@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 
 # YouSpotDL - App
 
@@ -143,3 +144,105 @@ lib/
 ---
 
 *Part of the [YouSpotDL](https://github.com/r00tmebaby/YouSpotDL) project.*
+=======
+# YouSpotDL
+
+Download Spotify or YouTube playlists as audio files using `yt-dlp` and `ffmpeg`.
+
+## Features
+
+- Download a single Spotify playlist
+- Download a single YouTube playlist
+- Download all playlists from your Spotify profile
+- Parallel downloads with progress bar
+- Startup dependency bootstrap:
+  - Detects `yt-dlp`
+  - Tries to extract `dlp.zip` if present
+  - Tries to install `yt-dlp` with `pip` if needed
+  - Detects `ffmpeg`
+  - Tries to extract `ffmpeg.zip` if present
+
+## Requirements
+
+- Python 3.10+
+- A Spotify app (for Spotify features)
+
+## Installation (Windows PowerShell)
+
+```powershell
+cd "C:\Users\r00tme\PycharmProjects\YouSpotDL"
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+## Spotify Setup (`.env`)
+
+Create a file named `.env` in the project root:
+
+```env
+SPOTIFY_CLIENT_ID=your_client_id
+SPOTIFY_CLIENT_SECRET=your_client_secret
+SPOTIFY_REDIRECT_URI=http://127.0.0.1:8888/callback
+```
+
+Get credentials from: https://developer.spotify.com/dashboard
+
+## Run
+
+```powershell
+cd "C:\Users\r00tme\PycharmProjects\YouSpotDL"
+python .\YouSpotDL.py
+```
+
+## Dependency Bootstrap Behavior
+
+At startup, the app checks tools in this order.
+
+`yt-dlp`:
+1. `dlp.exe` in project folder
+2. `yt-dlp` from PATH
+3. `python -m yt_dlp`
+4. Extract `dlp.zip` (if found)
+5. `python -m pip install yt-dlp`
+6. Exit with clear error if still unavailable
+
+`ffmpeg`:
+1. `ffmpeg.exe` in project folder
+2. Common `ffmpeg` subfolders
+3. `ffmpeg` from PATH
+4. Extract `ffmpeg.zip` (if found)
+5. Exit with clear error if still unavailable
+
+## Output
+
+- Files are saved under the folder you enter in the menu.
+- Each playlist gets its own subfolder.
+
+## Troubleshooting
+
+### Progress stuck at 0%
+
+- Usually caused by missing `yt-dlp`/`ffmpeg` or blocked subprocess startup.
+- Re-run the app and read startup messages.
+- Verify dependencies:
+
+```powershell
+python -m yt_dlp --version
+ffmpeg -version
+```
+
+### Downloads are `.webm` instead of `.mp3`
+
+- `ffmpeg` is missing or not detected.
+- Ensure `ffmpeg.zip` exists in project root, then run again.
+- Or install ffmpeg globally and ensure it is in PATH.
+
+### Spotify auth fails
+
+- Check `.env` values.
+- Confirm redirect URI in Spotify dashboard matches `.env`.
+
+## Notes
+
+- `asyncio` is included in Python standard library; it is listed in `requirements.txt` for compatibility with the current project setup.
+>>>>>>> 673af2b (fix missisng libs)

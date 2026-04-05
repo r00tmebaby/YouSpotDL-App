@@ -1,12 +1,18 @@
 import os
 import asyncio
 import subprocess
+import shutil
+import sys
+import zipfile
 
+from dotenv import load_dotenv
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 from tqdm import tqdm
 from rich.panel import Panel
 from rich.console import Console
+
+load_dotenv()
 
 BANNER = """[bold cyan]
  █████ █████                      █████████                      █████    ██████████   █████      
@@ -30,10 +36,129 @@ BANNER = """[bold cyan]
 
 console = Console()
 
-SPOTIFY_CLIENT_ID = "1af4e8b8a8874ddbb4a8768ba474e9e2"
-SPOTIFY_CLIENT_SECRET = "ec10aacd1add456e8e7bbfce82f18b22"
+SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID")
+SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
+SPOTIFY_REDIRECT_URI = os.getenv("SPOTIFY_REDIRECT_URI", "http://127.0.0.1:8888/callback")
 
-FFMPEG_PATH = os.getcwd()
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def resolve_ytdlp_command():
+    """Find an available yt-dlp executable command."""
+    local_dlp = os.path.join(SCRIPT_DIR, "dlp.exe")
+    if os.path.isfile(local_dlp):
+        return [local_dlp]
+
+    ytdlp_in_path = shutil.which("yt-dlp")
+    if ytdlp_in_path:
+        return [ytdlp_in_path]
+
+    module_command = [sys.executable, "-m", "yt_dlp"]
+    try:
+        check = subprocess.run(
+            module_command + ["--version"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=20,
+        )
+        if check.returncode == 0:
+            return module_command
+    except Exception:
+        pass
+
+    return None
+
+
+YTDLP_COMMAND = resolve_ytdlp_command()
+
+
+def resolve_ffmpeg_location():
+    """Find ffmpeg location for yt-dlp post-processing."""
+    candidates = [
+        os.path.join(SCRIPT_DIR, "ffmpeg.exe"),
+        os.path.join(SCRIPT_DIR, "ffmpeg", "ffmpeg.exe"),
+        os.path.join(SCRIPT_DIR, "ffmpeg", "bin", "ffmpeg.exe"),
+    ]
+
+    ffmpeg_root = os.path.join(SCRIPT_DIR, "ffmpeg")
+    if os.path.isdir(ffmpeg_root):
+        for root, _, files in os.walk(ffmpeg_root):
+            if "ffmpeg.exe" in files:
+                candidates.append(os.path.join(root, "ffmpeg.exe"))
+
+    for candidate in candidates:
+        if os.path.isfile(candidate):
+            return os.path.dirname(candidate)
+
+    ffmpeg_in_path = shutil.which("ffmpeg")
+    if ffmpeg_in_path:
+        return os.path.dirname(ffmpeg_in_path)
+
+    return None
+
+
+FFMPEG_LOCATION = resolve_ffmpeg_location()
+FFMPEG_WARNING_SHOWN = False
+
+
+def extract_zip_archive(zip_path, destination):
+    """Extract a zip archive and return True when extraction succeeds."""
+    try:
+        with zipfile.ZipFile(zip_path, "r") as archive:
+            archive.extractall(destination)
+        return True
+    except Exception as error:
+        console.print(f"\n❌ [red]Failed to extract {os.path.basename(zip_path)}: {error}[/red]")
+        return False
+
+
+def try_install_ytdlp():
+    """Attempt to install yt-dlp into the current Python environment."""
+    console.print("\n🧰 [yellow]yt-dlp not found. Trying to install it...[/yellow]")
+    install_command = [sys.executable, "-m", "pip", "install", "yt-dlp"]
+
+    result = subprocess.run(install_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if result.returncode == 0:
+        return True
+
+    console.print("\n❌ [red]Automatic yt-dlp installation failed.[/red]")
+    stderr_tail = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else "Unknown pip error"
+    console.print(f"[red]{stderr_tail}[/red]")
+    return False
+
+
+def bootstrap_dependencies():
+    """Validate external tools and try safe auto-recovery steps."""
+    global YTDLP_COMMAND
+    global FFMPEG_LOCATION
+
+    if not YTDLP_COMMAND:
+        dlp_zip = os.path.join(SCRIPT_DIR, "dlp.zip")
+        if os.path.isfile(dlp_zip):
+            console.print("\n📦 [yellow]Found dlp.zip. Extracting...[/yellow]")
+            extract_zip_archive(dlp_zip, SCRIPT_DIR)
+            YTDLP_COMMAND = resolve_ytdlp_command()
+
+    if not YTDLP_COMMAND and try_install_ytdlp():
+        YTDLP_COMMAND = resolve_ytdlp_command()
+
+    if not YTDLP_COMMAND:
+        console.print("\n❌ [red]yt-dlp is required but not available.[/red]")
+        console.print("[yellow]Install it manually with: python -m pip install yt-dlp[/yellow]")
+        raise SystemExit(1)
+
+    if not FFMPEG_LOCATION:
+        ffmpeg_zip = os.path.join(SCRIPT_DIR, "ffmpeg.zip")
+        if os.path.isfile(ffmpeg_zip):
+            console.print("\n📦 [yellow]Found ffmpeg.zip. Extracting...[/yellow]")
+            extract_zip_archive(ffmpeg_zip, os.path.join(SCRIPT_DIR, "ffmpeg"))
+            FFMPEG_LOCATION = resolve_ffmpeg_location()
+
+    if not FFMPEG_LOCATION:
+        console.print("\n❌ [red]ffmpeg is required for MP3 conversion but was not found.[/red]")
+        console.print("[yellow]Place ffmpeg.exe in project folder, or keep ffmpeg.zip in the project root.[/yellow]")
+        raise SystemExit(1)
 
 
 def get_optimal_threads():
@@ -46,14 +171,29 @@ MAX_CONCURRENT_DOWNLOADS = get_optimal_threads()
 
 def get_spotify_client():
     """Authenticate with Spotify using OAuth."""
-    auth_manager = SpotifyOAuth(
-        client_id=SPOTIFY_CLIENT_ID,
-        client_secret=SPOTIFY_CLIENT_SECRET,
-        redirect_uri="http://127.0.0.1:8888/callback",
-        scope="playlist-read-private playlist-read-collaborative",
-        cache_path=".cache-spotify"
-    )
-    return spotipy.Spotify(auth_manager=auth_manager)
+    missing = []
+    if not SPOTIFY_CLIENT_ID:
+        missing.append("SPOTIFY_CLIENT_ID")
+    if not SPOTIFY_CLIENT_SECRET:
+        missing.append("SPOTIFY_CLIENT_SECRET")
+
+    if missing:
+        console.print(f"\n❌ [red]Missing Spotify credentials in .env: {', '.join(missing)}[/red]")
+        console.print("[yellow]Create a .env file with your credentials from https://developer.spotify.com/dashboard[/yellow]")
+        raise SystemExit(1)
+
+    try:
+        auth_manager = SpotifyOAuth(
+            client_id=SPOTIFY_CLIENT_ID,
+            client_secret=SPOTIFY_CLIENT_SECRET,
+            redirect_uri=SPOTIFY_REDIRECT_URI,
+            scope="playlist-read-private playlist-read-collaborative",
+            cache_path=".cache-spotify"
+        )
+        return spotipy.Spotify(auth_manager=auth_manager)
+    except Exception as e:
+        console.print(f"\n❌ [red]Spotify authentication failed: {e}[/red]")
+        raise SystemExit(1)
 
 
 def get_user_playlists():
@@ -103,7 +243,7 @@ async def fetch_playlist_songs(platform, url):
             console.print(f"\n❌ [red]Error accessing Spotify playlist: {e}[/red]")
 
     elif platform == "YouTube":
-        command = ["dlp.exe", "--flat-playlist", "--print", "%(title)s|%(url)s", url]
+        command = YTDLP_COMMAND + ["--flat-playlist", "--print", "%(title)s|%(url)s", url]
         result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
         for line in result.stdout.splitlines():
@@ -118,11 +258,11 @@ async def fetch_playlist_songs(platform, url):
 
 async def download_song(song_name, output_folder):
     """Downloads a single song using yt-dlp."""
-    command = [
-        "dlp.exe",
+    global FFMPEG_WARNING_SHOWN
+
+    command = YTDLP_COMMAND + [
         "-x",
         "--audio-format", "mp3",
-        "--ffmpeg-location", FFMPEG_PATH,
         "--output", f"{output_folder}/%(title)s.%(ext)s",
         "--concurrent-fragments", str(get_optimal_threads()),
         "--limit-rate", "5M",
@@ -130,10 +270,22 @@ async def download_song(song_name, output_folder):
         f"ytsearch:{song_name}"
     ]
 
+    if FFMPEG_LOCATION:
+        command[2:2] = ["--ffmpeg-location", FFMPEG_LOCATION]
+    elif not FFMPEG_WARNING_SHOWN:
+        console.print("\n⚠ [yellow]ffmpeg not found. yt-dlp will keep original audio format (e.g., .webm).[/yellow]")
+        FFMPEG_WARNING_SHOWN = True
+
     process = await asyncio.create_subprocess_exec(
-        *command, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+        *command, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE
     )
-    await process.communicate()
+    _, stderr_data = await process.communicate()
+
+    if process.returncode != 0 and stderr_data:
+        message = stderr_data.decode(errors="ignore").strip().splitlines()
+        if message:
+            console.print(f"\n❌ [red]yt-dlp failed for '{song_name}': {message[-1]}[/red]")
+
     return process.returncode == 0
 
 
@@ -141,15 +293,18 @@ async def worker(queue, output_folder, progress_bar, status):
     """Worker function for parallel downloads."""
     while not queue.empty():
         song_name = await queue.get()
-        success = await download_song(song_name, output_folder)
+        try:
+            success = await download_song(song_name, output_folder)
 
-        if success:
-            status["downloaded"] += 1
-        else:
+            if success:
+                status["downloaded"] += 1
+            else:
+                status["errors"] += 1
+        except Exception:
             status["errors"] += 1
-
-        progress_bar.update(1)
-        queue.task_done()
+        finally:
+            progress_bar.update(1)
+            queue.task_done()
 
 
 async def download_concurrent(playlist_name, songs, download_dir):
@@ -236,4 +391,5 @@ async def menu():
 
 
 if __name__ == "__main__":
+    bootstrap_dependencies()
     asyncio.run(menu())
