@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as pathlib;
 import 'package:archive/archive_io.dart';
 
@@ -101,10 +100,12 @@ class BootstrapService {
 
   // ── ffmpeg download (Windows only) ───────────────────────────────────────
 
-  // yt-dlp's own essentials build — contains only ffmpeg/ffprobe (~25 MB)
+  // yt-dlp's shared Windows build — ~96 MB compressed.
+  // "Shared" means ffmpeg.exe + DLLs; all go into toolDir/ffmpeg/ so the
+  // existing _findFfmpeg() path (toolDir/ffmpeg/ffmpeg.exe) finds it.
   static const _ffmpegZipUrl =
       'https://github.com/yt-dlp/FFmpeg-Builds/releases/latest/download/'
-      'ffmpeg-master-latest-win64-gpl-essentials.zip';
+      'ffmpeg-master-latest-win64-gpl-shared.zip';
 
   Stream<DownloadProgress> downloadFfmpeg() async* {
     if (!_isWin) {
@@ -116,65 +117,87 @@ class BootstrapService {
 
     final zipPath = pathlib.join(toolDir, '_ffmpeg_tmp.zip');
 
-    // Download (reports 0→85%)
+    // Step 1: download zip (0 → 85 %)
     await for (final p in _downloadFile(_ffmpegZipUrl, zipPath, 'Downloading ffmpeg')) {
       yield DownloadProgress(p.fraction * 0.85, p.label);
     }
 
-    // Extract ffmpeg.exe from the zip (85→100%)
-    yield const DownloadProgress(0.87, 'Extracting ffmpeg.exe…');
-    final bytes = File(zipPath).readAsBytesSync();
-    final archive = ZipDecoder().decodeBytes(bytes);
+    // Step 2: extract the bin/ folder from the zip into toolDir/ffmpeg/
+    yield const DownloadProgress(0.87, 'Extracting ffmpeg…');
 
-    bool extracted = false;
+    final outDir = Directory(pathlib.join(toolDir, 'ffmpeg'));
+    await outDir.create(recursive: true);
+
+    // Use InputFileStream for memory-efficient extraction (avoids loading 96 MB at once).
+    final inputStream = InputFileStream(zipPath);
+    final archive = ZipDecoder().decodeStream(inputStream);
+    int extracted = 0;
+
     for (final entry in archive) {
-      if (entry.isFile && pathlib.basename(entry.name).toLowerCase() == 'ffmpeg.exe') {
-        final outPath = pathlib.join(toolDir, 'ffmpeg.exe');
-        File(outPath).writeAsBytesSync(entry.content as List<int>);
-        extracted = true;
-        break;
+      if (!entry.isFile) continue;
+      // Zip path: "ffmpeg-master-latest-win64-gpl-shared/bin/ffmpeg.exe"
+      // → keep only the filename, write to toolDir/ffmpeg/filename
+      final segments = entry.name.replaceAll('\\', '/').split('/');
+      if (segments.length < 2) continue;
+      final parent = segments[segments.length - 2]; // "bin"
+      if (parent != 'bin') continue;
+
+      final fileName = segments.last;
+      final outPath = pathlib.join(outDir.path, fileName);
+      final content = entry.content;
+      if (content is List<int>) {
+        File(outPath).writeAsBytesSync(content);
+        extracted++;
       }
     }
+    inputStream.closeSync();
 
     try { File(zipPath).deleteSync(); } catch (_) {}
 
-    if (!extracted) throw Exception('ffmpeg.exe not found inside the downloaded zip.');
+    if (extracted == 0) throw Exception('No files extracted from ffmpeg zip.');
     yield const DownloadProgress(1.0, 'ffmpeg ready');
   }
 
-  // ── Internal HTTP downloader ──────────────────────────────────────────────
+  // ── Internal HTTP downloader ─────────────────────────────────────────────
+  // Uses dart:io HttpClient so it follows 302 redirects automatically.
+  // (GitHub releases always redirect to a CDN — http.Client.send() would fail.)
 
   Stream<DownloadProgress> _downloadFile(
     String url,
     String dest,
     String label,
   ) async* {
-    final client = http.Client();
+    final httpClient = HttpClient();
     try {
-      final req = http.Request('GET', Uri.parse(url));
-      final resp = await client.send(req);
-      if (resp.statusCode != 200) {
-        throw Exception('HTTP ${resp.statusCode} while downloading $label');
+      final request = await httpClient.getUrl(Uri.parse(url));
+      request.followRedirects = true;
+      request.maxRedirects = 10;
+
+      final response = await request.close();
+      if (response.statusCode != 200) {
+        throw Exception('HTTP ${response.statusCode} while downloading $label');
       }
 
-      final total = resp.contentLength ?? 0;
+      final total = response.contentLength; // -1 if unknown
       var received = 0;
 
       await Directory(pathlib.dirname(dest)).create(recursive: true);
       final sink = File(dest).openWrite();
 
-      await for (final chunk in resp.stream) {
+      await for (final chunk in response) {
         sink.add(chunk);
         received += chunk.length;
+        final mb = (received / 1048576).toStringAsFixed(1);
+        final totalMb = total > 0 ? ' / ${(total / 1048576).toStringAsFixed(1)} MB' : '';
         yield DownloadProgress(
-          total > 0 ? received / total : 0,
-          '$label${total > 0 ? ' (${(received / 1048576).toStringAsFixed(1)} / ${(total / 1048576).toStringAsFixed(1)} MB)' : '…'}',
+          total > 0 ? received / total : (received / (30 * 1048576)).clamp(0.0, 0.99),
+          '$label ($mb MB$totalMb)',
         );
       }
       await sink.close();
       yield DownloadProgress(1.0, '$label — done');
     } finally {
-      client.close();
+      httpClient.close(force: true);
     }
   }
 }

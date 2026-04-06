@@ -281,7 +281,8 @@ class _SetupDialogState extends State<_SetupDialog> {
           mainAxisSize: MainAxisSize.min,
           children: [
             const Text(
-              'Downloading required tools next to the app. This only happens once.',
+              'Downloading required tools next to the app. This only happens once.\n'
+              'yt-dlp ~10 MB · ffmpeg ~96 MB (Windows shared build)',
               style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
             ),
             const SizedBox(height: 20),
