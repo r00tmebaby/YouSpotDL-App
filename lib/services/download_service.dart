@@ -121,6 +121,18 @@ class DownloadService {
 
   bool get ffmpegAvailable => _findFfmpeg() != null;
 
+  /// Returns the full path to the yt-dlp binary being used, or null.
+  String? getYtdlpPath() {
+    try { return _findYtdlp(); } catch (_) { return null; }
+  }
+
+  /// Returns the full path to the ffmpeg binary being used, or null.
+  String? getFfmpegPath() {
+    final dir = _findFfmpeg();
+    if (dir == null) return null;
+    return p.join(dir, _isWindows ? 'ffmpeg.exe' : 'ffmpeg');
+  }
+
   /// Returns the installed yt-dlp version string, e.g. "2024.11.18".
   Future<String?> getYtdlpVersion() async {
     try {

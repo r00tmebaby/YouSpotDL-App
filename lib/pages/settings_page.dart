@@ -315,6 +315,8 @@ class _ToolsInfoCard extends ConsumerWidget {
               data: (tools) {
                 final ytVer  = tools['ytdlp'];
                 final ffVer  = tools['ffmpeg'];
+                final ytPath = tools['ytdlp_path'];
+                final ffPath = tools['ffmpeg_path'];
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -322,6 +324,7 @@ class _ToolsInfoCard extends ConsumerWidget {
                       icon: Icons.download_for_offline_outlined,
                       name: 'yt-dlp',
                       version: ytVer,
+                      path: ytPath,
                       hint: ytVer == null
                           ? (os == 'windows'
                               ? 'Place dlp.exe next to the app'
@@ -333,6 +336,7 @@ class _ToolsInfoCard extends ConsumerWidget {
                       icon: Icons.movie_filter_outlined,
                       name: 'ffmpeg',
                       version: ffVer,
+                      path: ffPath,
                       hint: ffVer == null
                           ? (os == 'windows'
                               ? 'Extract ffmpeg.zip next to the app'
@@ -357,6 +361,7 @@ class _ToolRow extends StatelessWidget {
   final IconData icon;
   final String name;
   final String? version;
+  final String? path;
   final String? hint;
   final String? warningIfMissing;
 
@@ -364,6 +369,7 @@ class _ToolRow extends StatelessWidget {
     required this.icon,
     required this.name,
     this.version,
+    this.path,
     this.hint,
     this.warningIfMissing,
   });
@@ -407,6 +413,21 @@ class _ToolRow extends StatelessWidget {
               ),
           ],
         ),
+        // ── Show resolved path so user can confirm which binary is used ──
+        if (found && path != null) ...[
+          const SizedBox(height: 3),
+          Padding(
+            padding: const EdgeInsets.only(left: 24),
+            child: SelectableText(
+              path!,
+              style: TextStyle(
+                color: AppTheme.textSecondary.withValues(alpha: 0.6),
+                fontSize: 10,
+                fontFamily: 'monospace',
+              ),
+            ),
+          ),
+        ],
         if (!found && hint != null) ...[
           const SizedBox(height: 4),
           Padding(

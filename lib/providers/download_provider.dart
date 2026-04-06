@@ -44,12 +44,21 @@ final historyProvider = FutureProvider<List<HistoryEntry>>((ref) async {
   return _loadHistory();
 });
 
-/// Provides yt-dlp and ffmpeg version strings (null = not found).
+/// Provides yt-dlp and ffmpeg version strings + resolved paths.
+/// Keys: 'ytdlp', 'ffmpeg' (version strings), 'ytdlp_path', 'ffmpeg_path' (full binary paths).
+/// null = not found.
 final toolsInfoProvider = FutureProvider<Map<String, String?>>((ref) async {
   final svc = ref.read(downloadServiceProvider);
-  final ytVer = await svc.getYtdlpVersion();
-  final ffVer = await svc.getFfmpegVersion();
-  return {'ytdlp': ytVer, 'ffmpeg': ffVer};
+  final ytVer  = await svc.getYtdlpVersion();
+  final ffVer  = await svc.getFfmpegVersion();
+  final ytPath = svc.getYtdlpPath();
+  final ffPath = svc.getFfmpegPath();
+  return {
+    'ytdlp':       ytVer,
+    'ffmpeg':      ffVer,
+    'ytdlp_path':  ytPath,
+    'ffmpeg_path': ffPath,
+  };
 });
 
 Future<String> _historyPath() async {
