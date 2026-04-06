@@ -1,0 +1,113 @@
+name: Build and Release Flutter Desktop App
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 'stable'
+      - name: Install dependencies
+        run: flutter pub get
+        working-directory: app
+      - name: Build Windows executable
+        run: flutter build windows --release
+        working-directory: app
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-executable
+          path: app/build/windows/x64/runner/Release/
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 'stable'
+      - name: Install dependencies
+        run: flutter pub get
+        working-directory: app
+      - name: Build macOS executable
+        run: flutter build macos --release
+        working-directory: app
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-executable
+          path: app/build/macos/Build/Products/Release/
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 'stable'
+      - name: Install dependencies
+        run: flutter pub get
+        working-directory: app
+      - name: Build Linux executable
+        run: flutter build linux --release
+        working-directory: app
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-executable
+          path: app/build/linux/x64/release/bundle/
+
+  release:
+    needs: [build-windows, build-macos, build-linux]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+      - name: Upload Windows artifact to Release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: artifacts/windows-executable/YouSpotDL.exe
+          asset_name: YouSpotDL-windows.exe
+          asset_content_type: application/octet-stream
+      - name: Upload macOS artifact to Release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: artifacts/macos-executable/YouSpotDL.app
+          asset_name: YouSpotDL-macos.app
+          asset_content_type: application/octet-stream
+      - name: Upload Linux artifact to Release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: artifacts/linux-executable/YouSpotDL
+          asset_name: YouSpotDL-linux
+          asset_content_type: application/octet-stream
