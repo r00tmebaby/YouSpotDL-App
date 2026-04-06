@@ -97,6 +97,12 @@ class BootstrapService {
     }
   }
 
+  /// Force update (re-download) yt-dlp, even if already present.
+  Stream<DownloadProgress> updateYtdlp() async* {
+    // Overwrite the existing binary with the latest version.
+    yield* downloadYtdlp();
+  }
+
   // ── ffmpeg download (Windows only) ───────────────────────────────────────
 
   // yt-dlp's shared Windows build — ~96 MB compressed.
@@ -157,6 +163,12 @@ class BootstrapService {
     yield const DownloadProgress(1.0, 'ffmpeg ready');
   }
 
+  /// Force update (re-download) ffmpeg, even if already present (Windows only).
+  Stream<DownloadProgress> updateFfmpeg() async* {
+    // Overwrite the existing ffmpeg binaries with the latest version.
+    yield* downloadFfmpeg();
+  }
+
   // ── Internal HTTP downloader ─────────────────────────────────────────────
   // Uses dart:io HttpClient so it follows 302 redirects automatically.
   // (GitHub releases always redirect to a CDN — http.Client.send() would fail.)
@@ -200,4 +212,3 @@ class BootstrapService {
     }
   }
 }
-

@@ -346,6 +346,64 @@ class _ToolsInfoCard extends ConsumerWidget {
                           : null,
                       warningIfMissing: 'MP3 conversion and HD video merging will not work',
                     ),
+                    // Add update buttons for yt-dlp and ffmpeg
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            icon: const Icon(Icons.system_update_alt),
+                            label: const Text('Update yt-dlp'),
+                            onPressed: () async {
+                              final messenger = ScaffoldMessenger.of(context);
+                              showDialog(
+                                context: context,
+                                barrierDismissible: false,
+                                builder: (ctx) => const Center(child: CircularProgressIndicator()),
+                              );
+                              try {
+                                await for (final p in BootstrapService().updateYtdlp()) {
+                                  // Optionally, show progress in a better dialog
+                                }
+                                messenger.showSnackBar(const SnackBar(content: Text('yt-dlp updated!')));
+                                ref.invalidate(toolsInfoProvider);
+                              } catch (e) {
+                                messenger.showSnackBar(SnackBar(content: Text('yt-dlp update failed: $e')));
+                              } finally {
+                                Navigator.of(context, rootNavigator: true).pop();
+                              }
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        if (Platform.isWindows)
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              icon: const Icon(Icons.system_update_alt),
+                              label: const Text('Update ffmpeg'),
+                              onPressed: () async {
+                                final messenger = ScaffoldMessenger.of(context);
+                                showDialog(
+                                  context: context,
+                                  barrierDismissible: false,
+                                  builder: (ctx) => const Center(child: CircularProgressIndicator()),
+                                );
+                                try {
+                                  await for (final p in BootstrapService().updateFfmpeg()) {
+                                    // Optionally, show progress in a better dialog
+                                  }
+                                  messenger.showSnackBar(const SnackBar(content: Text('ffmpeg updated!')));
+                                  ref.invalidate(toolsInfoProvider);
+                                } catch (e) {
+                                  messenger.showSnackBar(SnackBar(content: Text('ffmpeg update failed: $e')));
+                                } finally {
+                                  Navigator.of(context, rootNavigator: true).pop();
+                                }
+                              },
+                            ),
+                          ),
+                      ],
+                    ),
                   ],
                 );
               },
