@@ -26,50 +26,49 @@ class BootstrapService {
   static bool get _isWin => Platform.isWindows;
 
   // ── Tool directory ────────────────────────────────────────────────────────
-  /// Returns the directory where tools should be downloaded.
-  /// In dev mode walks up to find project root (pubspec.yaml).
-  /// In release mode uses the exe directory.
-  static String get toolDir {
-    final exeDir = pathlib.dirname(Platform.resolvedExecutable);
-    var dir = exeDir;
+  /// Where downloaded tools are placed.
+  /// Uses the exe directory so DownloadService (which checks there first)
+  /// always finds them immediately — both in dev and release builds.
+  static String get toolDir => pathlib.dirname(Platform.resolvedExecutable);
+
+  // ── Status checks — mirror DownloadService._findYtdlp() walk-up logic ────
+
+  static bool get ytdlpAvailable {
+    final names = _isWin ? ['dlp.exe', 'yt-dlp.exe'] : ['yt-dlp', 'dlp'];
+    var dir = pathlib.dirname(Platform.resolvedExecutable);
     for (var i = 0; i < 10; i++) {
-      if (File(pathlib.join(dir, 'pubspec.yaml')).existsSync()) return dir;
+      for (final name in names) {
+        if (File(pathlib.join(dir, name)).existsSync()) return true;
+      }
       final parent = pathlib.dirname(dir);
       if (parent == dir) break;
       dir = parent;
     }
-    return exeDir;
-  }
-
-  // ── Status checks ─────────────────────────────────────────────────────────
-
-  static bool get ytdlpAvailable {
-    final names = _isWin ? ['dlp.exe', 'yt-dlp.exe'] : ['yt-dlp', 'dlp'];
-    for (final name in names) {
-      if (File(pathlib.join(toolDir, name)).existsSync()) return true;
-    }
     final whichCmd = _isWin ? 'where' : 'which';
     for (final name in ['yt-dlp', 'dlp']) {
-      try {
-        if (Process.runSync(whichCmd, [name]).exitCode == 0) return true;
-      } catch (_) {}
+      try { if (Process.runSync(whichCmd, [name]).exitCode == 0) return true; }
+      catch (_) {}
     }
     return false;
   }
 
   static bool get ffmpegAvailable {
     final bin = _isWin ? 'ffmpeg.exe' : 'ffmpeg';
-    final dir = toolDir;
-    for (final candidate in [
-      pathlib.join(dir, bin),
-      pathlib.join(dir, 'ffmpeg', bin),
-      pathlib.join(dir, 'ffmpeg', 'bin', bin),
-    ]) {
-      if (File(candidate).existsSync()) return true;
+    var dir = pathlib.dirname(Platform.resolvedExecutable);
+    for (var i = 0; i < 12; i++) {
+      for (final candidate in [
+        pathlib.join(dir, bin),
+        pathlib.join(dir, 'ffmpeg', bin),
+        pathlib.join(dir, 'ffmpeg', 'bin', bin),
+      ]) {
+        if (File(candidate).existsSync()) return true;
+      }
+      final parent = pathlib.dirname(dir);
+      if (parent == dir) break;
+      dir = parent;
     }
-    try {
-      if (Process.runSync(_isWin ? 'where' : 'which', ['ffmpeg']).exitCode == 0) return true;
-    } catch (_) {}
+    try { if (Process.runSync(_isWin ? 'where' : 'which', ['ffmpeg']).exitCode == 0) return true; }
+    catch (_) {}
     return false;
   }
 

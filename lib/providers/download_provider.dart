@@ -18,9 +18,16 @@ final downloadServiceProvider = Provider<DownloadService>((ref) => DownloadServi
 final bootstrapServiceProvider = Provider<BootstrapService>((ref) => BootstrapService());
 
 /// Live tool-status check — invalidate after auto-setup to refresh.
+/// Uses DownloadService (same as toolsInfoProvider) so home page banner
+/// and Settings panel always agree — single source of truth.
 final toolStatusProvider = FutureProvider<ToolStatus>((ref) async {
-  // Run in an isolate-friendly way; the check is synchronous but fast.
-  return BootstrapService.checkStatus();
+  final svc = ref.read(downloadServiceProvider);
+  final ytVersion = await svc.getYtdlpVersion();
+  final ffVersion = await svc.getFfmpegVersion();
+  return ToolStatus(
+    ytdlpFound: ytVersion != null,
+    ffmpegFound: ffVersion != null,
+  );
 });
 
 final downloadProvider =
