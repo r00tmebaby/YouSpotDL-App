@@ -5,6 +5,45 @@
 
 ---
 
+## Screenshots
+
+<table>
+  <tr>
+    <td align="center">
+      <a href="docs/main.png">
+        <img src="docs/main.png" alt="YouSpotDL home screen" width="100%" />
+      </a>
+      <br />
+      <sub><b>Home</b></sub>
+    </td>
+    <td align="center">
+      <a href="docs/download.png">
+        <img src="docs/download.png" alt="YouSpotDL download screen" width="100%" />
+      </a>
+      <br />
+      <sub><b>Download</b></sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="docs/history.png">
+        <img src="docs/history.png" alt="YouSpotDL history screen" width="100%" />
+      </a>
+      <br />
+      <sub><b>History</b></sub>
+    </td>
+    <td align="center">
+      <a href="docs/settings-system.png">
+        <img src="docs/settings-system.png" alt="YouSpotDL system tools screen" width="100%" />
+      </a>
+      <br />
+      <sub><b>System Tools</b></sub>
+    </td>
+  </tr>
+</table>
+
+---
+
 ## Features
 
 | | |
@@ -69,7 +108,7 @@ flutter run -d windows   # or: -d macos  /  -d linux
 
 ```bash
 flutter build windows --release
-# Output: build/windows/x64/runner/Release/app.exe
+# Output: build/windows/x64/runner/Release/YouSpotDL.exe
 ```
 
 ---
