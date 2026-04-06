@@ -54,3 +54,13 @@ app.*.map.json
 # Sensitive
 .env
 
+# Downloaded runtime tools (auto-downloaded by bootstrap, not committed)
+yt-dlp.exe
+yt-dlp
+dlp.exe
+dlp
+ffmpeg.exe
+ffmpeg/
+_ffmpeg_tmp.zip
+_ffmpeg_dl.zip
+
