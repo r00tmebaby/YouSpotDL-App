@@ -7,40 +7,21 @@
 
 ## Screenshots
 
-<table>
-  <tr>
-    <td align="center">
-      <a href="docs/main.png">
-        <img src="docs/main.png" alt="YouSpotDL home screen" width="100%" />
-      </a>
-      <br />
-      <sub><b>Home</b></sub>
-    </td>
-    <td align="center">
-      <a href="docs/download.png">
-        <img src="docs/download.png" alt="YouSpotDL download screen" width="100%" />
-      </a>
-      <br />
-      <sub><b>Download</b></sub>
-    </td>
-  </tr>
-  <tr>
-    <td align="center">
-      <a href="docs/history.png">
-        <img src="docs/history.png" alt="YouSpotDL history screen" width="100%" />
-      </a>
-      <br />
-      <sub><b>History</b></sub>
-    </td>
-    <td align="center">
-      <a href="docs/settings-system.png">
-        <img src="docs/settings-system.png" alt="YouSpotDL system tools screen" width="100%" />
-      </a>
-      <br />
-      <sub><b>System Tools</b></sub>
-    </td>
-  </tr>
-</table>
+### Home
+
+[![YouSpotDL home screen](docs/main.png)](docs/main.png)
+
+### Download
+
+[![YouSpotDL download screen](docs/download.png)](docs/download.png)
+
+### History
+
+[![YouSpotDL history screen](docs/history.png)](docs/history.png)
+
+### System Tools
+
+[![YouSpotDL system tools screen](docs/settings-system.png)](docs/settings-system.png)
 
 ---
 
