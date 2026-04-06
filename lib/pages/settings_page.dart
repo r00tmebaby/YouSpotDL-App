@@ -8,6 +8,7 @@ import '../models/settings.dart';
 import '../providers/settings_provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/download_provider.dart';
+import '../services/bootstrap_service.dart';
 
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
