@@ -1,4 +1,4 @@
-# YouSpotDL — App
+# YouSpotDL - App
 
 > **Desktop GUI for downloading Spotify playlists, YouTube playlists, and content from 1000+ sites.**  
 > Built with Flutter · powered by [yt-dlp](https://github.com/yt-dlp/yt-dlp) and [ffmpeg](https://ffmpeg.org/).
