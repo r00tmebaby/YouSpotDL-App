@@ -11,9 +11,17 @@ import '../models/song.dart';
 import '../models/video_info.dart';
 import '../services/spotify_api_service.dart';
 import '../services/download_service.dart';
+import '../services/bootstrap_service.dart';
 
 final spotifyApiProvider = Provider<SpotifyApiService>((ref) => SpotifyApiService());
 final downloadServiceProvider = Provider<DownloadService>((ref) => DownloadService());
+final bootstrapServiceProvider = Provider<BootstrapService>((ref) => BootstrapService());
+
+/// Live tool-status check — invalidate after auto-setup to refresh.
+final toolStatusProvider = FutureProvider<ToolStatus>((ref) async {
+  // Run in an isolate-friendly way; the check is synchronous but fast.
+  return BootstrapService.checkStatus();
+});
 
 final downloadProvider =
     StateNotifierProvider<DownloadNotifier, DownloadState>((ref) {
