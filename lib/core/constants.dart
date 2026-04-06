@@ -1,0 +1,9 @@
+const String appName = 'YouSpotDL';
+const String appVersion = '1.0.0';
+const String spotifyTokenEndpoint = 'https://accounts.spotify.com/api/token';
+const String spotifyAuthEndpoint = 'https://accounts.spotify.com/authorize';
+const String spotifyScopes = 'playlist-read-private playlist-read-collaborative';
+const String defaultRedirectUri = 'http://127.0.0.1:8888/callback';
+const int defaultOAuthPort = 8888;
+const int minConcurrency = 1;
+const int maxConcurrency = 24;
