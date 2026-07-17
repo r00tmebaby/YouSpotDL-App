@@ -29,11 +29,22 @@ class _DownloadPageState extends ConsumerState<DownloadPage> {
     super.dispose();
   }
 
-  void _fetch() {
+  Future<void> _fetch() async {
     final url = _urlController.text.trim();
     if (url.isEmpty) return;
 
     _lastKnownProgress.clear();
+
+    // Refresh an expired Spotify access token before use so private-playlist
+    // lookups do not fail once the 1-hour token lifetime has elapsed.
+    final settings = ref.read(settingsProvider);
+    if (settings.clientId.isNotEmpty) {
+      await ref.read(authProvider.notifier).refreshIfNeeded(
+            clientId: settings.clientId,
+            clientSecret: settings.clientSecret,
+          );
+    }
+
     final token = ref.read(authProvider.notifier).accessToken;
     ref.read(downloadProvider.notifier).fetchUrl(url, token: token);
   }

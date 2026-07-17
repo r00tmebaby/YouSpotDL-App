@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 import '../models/video_info.dart';
 
@@ -196,56 +197,67 @@ class DownloadService {
     return null;
   }
 
-  /// Fetch a Spotify playlist's tracks via yt-dlp — works for **public** playlists
-  /// without any Spotify API credentials. Returns a map with keys `playlistName`
-  /// (String) and `tracks` (List<Map<String,String>> with `title` and `artist`),
-  /// or `null` when yt-dlp cannot access the playlist (private, bad URL, or old
-  /// yt-dlp build that lacks Spotify support).
-  Future<Map<String, dynamic>?> fetchSpotifyPlaylistViaYtdlp(String url) async {
+  /// Extract the base62 playlist ID from a Spotify playlist URL or URI.
+  /// Handles `https://open.spotify.com/playlist/<id>?si=...` and
+  /// `spotify:playlist:<id>` forms.
+  static String? _spotifyPlaylistId(String url) {
+    final match = RegExp(r'playlist[/:]([A-Za-z0-9]+)').firstMatch(url);
+    return match?.group(1);
+  }
+
+  /// Fetch a public Spotify playlist's tracks by reading the track list embedded
+  /// in the playlist's public embed page. This works for public playlists
+  /// without any Spotify API credentials.
+  ///
+  /// It replaces the previous yt-dlp based lookup: yt-dlp now routes every
+  /// Spotify URL to its "known DRM" handler and aborts before extracting
+  /// anything, so it can no longer list Spotify playlist tracks.
+  ///
+  /// Returns a map with keys `playlistName` (String) and `tracks`
+  /// (`List<Map<String, String>>` with `title` and `artist`), or `null` when the
+  /// playlist is private/unavailable or the embed payload layout changed.
+  Future<Map<String, dynamic>?> fetchSpotifyPlaylistViaEmbed(String url) async {
     try {
-      final ytdlp = _findYtdlp();
-      final result = await Process.run(
-        ytdlp,
-        ['--flat-playlist', '--print', '%(playlist_title)s|%(title)s|%(artist)s', url],
-        stdoutEncoding: utf8,
-        stderrEncoding: utf8,
-      ).timeout(const Duration(seconds: 60));
+      final id = _spotifyPlaylistId(url);
+      if (id == null) return null;
 
-      if (result.exitCode != 0) return null;
+      final response = await http.get(
+        Uri.parse('https://open.spotify.com/embed/playlist/$id'),
+        headers: const {'User-Agent': 'Mozilla/5.0'},
+      ).timeout(const Duration(seconds: 30));
+      if (response.statusCode != 200) return null;
 
-      final output = result.stdout as String;
-      if (output.trim().isEmpty) return null;
+      // The embed page ships its data as a JSON blob in a __NEXT_DATA__ script.
+      final match = RegExp(
+        r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>',
+        dotAll: true,
+      ).firstMatch(response.body);
+      if (match == null) return null;
 
-      String? playlistName;
+      final data = jsonDecode(match.group(1)!) as Map<String, dynamic>;
+      final entity = data['props']?['pageProps']?['state']?['data']?['entity']
+          as Map<String, dynamic>?;
+      if (entity == null) return null;
+
+      final trackList = entity['trackList'] as List<dynamic>?;
+      if (trackList == null || trackList.isEmpty) return null;
+
       final tracks = <Map<String, String>>[];
-
-      for (final line in output.split('\n')) {
-        final trimmed = line.trim();
-        if (trimmed.isEmpty) continue;
-
-        final idx1 = trimmed.indexOf('|');
-        if (idx1 < 0) continue;
-        final idx2 = trimmed.indexOf('|', idx1 + 1);
-        if (idx2 < 0) continue;
-
-        final plTitle = trimmed.substring(0, idx1).trim();
-        final title   = trimmed.substring(idx1 + 1, idx2).trim();
-        final artist  = trimmed.substring(idx2 + 1).trim();
-
-        if (playlistName == null && plTitle.isNotEmpty && plTitle != 'NA') {
-          playlistName = plTitle;
-        }
-        if (title.isNotEmpty && title != 'NA') {
-          tracks.add({
-            'title':  title,
-            'artist': (artist.isEmpty || artist == 'NA') ? 'Unknown' : artist,
-          });
-        }
+      for (final item in trackList) {
+        if (item is! Map) continue;
+        final title = (item['title'] as String?)?.trim() ?? '';
+        final artist = (item['subtitle'] as String?)?.trim() ?? '';
+        if (title.isEmpty) continue;
+        tracks.add({
+          'title': title,
+          'artist': artist.isEmpty ? 'Unknown' : artist,
+        });
       }
-
       if (tracks.isEmpty) return null;
+
+      final name = (entity['name'] as String?)?.trim();
       return {
-        'playlistName': playlistName ?? 'Spotify Playlist',
+        'playlistName': (name == null || name.isEmpty) ? 'Spotify Playlist' : name,
         'tracks': tracks,
       };
     } catch (_) {

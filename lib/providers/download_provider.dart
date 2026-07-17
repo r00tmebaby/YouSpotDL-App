@@ -215,11 +215,12 @@ class DownloadNotifier extends StateNotifier<DownloadState> {
     try {
       switch (detected) {
         case DetectedUrlType.spotifyPlaylist:
-          // ── Try yt-dlp first — works for public playlists, no credentials needed ──
-          final ytdlpResult = await _downloadService.fetchSpotifyPlaylistViaYtdlp(url);
-          if (ytdlpResult != null) {
-            final trackList = (ytdlpResult['tracks'] as List).cast<Map<String, String>>();
-            final pName = ytdlpResult['playlistName'] as String;
+          // ── Public playlists: read the track list from Spotify's public
+          //    embed page — no credentials needed ──
+          final publicResult = await _downloadService.fetchSpotifyPlaylistViaEmbed(url);
+          if (publicResult != null) {
+            final trackList = (publicResult['tracks'] as List).cast<Map<String, String>>();
+            final pName = publicResult['playlistName'] as String;
             final songs = <Song>[
               for (var i = 0; i < trackList.length; i++)
                 Song(
@@ -234,7 +235,7 @@ class DownloadNotifier extends StateNotifier<DownloadState> {
             // ── Fall back to Spotify API OAuth (required for private playlists) ──
             if (token == null) {
               throw Exception(
-                'Could not fetch this Spotify playlist automatically.\n'
+                'Could not fetch this Spotify playlist.\n'
                 'If it is a private playlist, connect your Spotify account in Settings.',
               );
             }
@@ -293,11 +294,12 @@ class DownloadNotifier extends StateNotifier<DownloadState> {
 
     try {
       if (platform == Platform.spotify) {
-        // Try yt-dlp first (public playlists — no credentials needed)
-        final ytdlpResult = await _downloadService.fetchSpotifyPlaylistViaYtdlp(url);
-        if (ytdlpResult != null) {
-          final trackList = (ytdlpResult['tracks'] as List).cast<Map<String, String>>();
-          final pName = ytdlpResult['playlistName'] as String;
+        // Public playlists — read the track list from the public embed page
+        // (no credentials needed).
+        final publicResult = await _downloadService.fetchSpotifyPlaylistViaEmbed(url);
+        if (publicResult != null) {
+          final trackList = (publicResult['tracks'] as List).cast<Map<String, String>>();
+          final pName = publicResult['playlistName'] as String;
           final songs = <Song>[
             for (var i = 0; i < trackList.length; i++)
               Song(
