@@ -1,5 +1,5 @@
 const String appName = 'YouSpotDL';
-const String appVersion = '1.0.0';
+const String appVersion = '1.0.2';
 const String spotifyTokenEndpoint = 'https://accounts.spotify.com/api/token';
 const String spotifyAuthEndpoint = 'https://accounts.spotify.com/authorize';
 const String spotifyScopes = 'playlist-read-private playlist-read-collaborative';
