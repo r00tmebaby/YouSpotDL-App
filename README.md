@@ -46,7 +46,7 @@
 
 | Tool | Windows | macOS | Linux |
 |---|---|---|---|
-| **yt-dlp** | Place `dlp.exe` or `yt-dlp.exe` next to the app **or** `pip install yt-dlp` | `brew install yt-dlp` | `pip install yt-dlp` |
+| **yt-dlp** | Managed automatically (see [Updates](#updates)). Legacy fallback: `dlp.exe` or `yt-dlp.exe` next to the app **or** `pip install yt-dlp` | `brew install yt-dlp` | `pip install yt-dlp` |
 | **ffmpeg** | Extract `ffmpeg.zip` next to the app **or** install and add to PATH | `brew install ffmpeg` | `sudo apt install ffmpeg` |
 
 > **Without ffmpeg** — songs download as `.webm`/`.opus` instead of MP3, and HD videos cannot be merged.  
@@ -56,6 +56,35 @@
 
 - Flutter ≥ 3.11 / Dart ≥ 3.11  
 - Windows 10+, macOS 12+, or Linux (desktop target)
+
+---
+
+## Updates
+
+**yt-dlp** updates itself. On start the app checks the latest yt-dlp release at most once every 24 hours and downloads it in the background, so you never have to replace the binary by hand. Nothing is installed while a download is in progress.
+
+Managed tools live in a per-platform tools directory:
+
+| Platform | Tools directory |
+|---|---|
+| Windows | `%APPDATA%\com.youspotdl\YouSpotDL\tools` |
+| macOS | `~/Library/Application Support/com.youspotdl.app/tools` |
+| Linux | `~/.local/share/com.youspotdl.app/tools` |
+
+yt-dlp is located in this order: the managed copy in the tools directory, then a legacy `dlp.exe` / `yt-dlp.exe` next to the app (or in a parent folder), then `yt-dlp` on `PATH`.
+
+**ffmpeg** is not updated automatically. Install it manually, or place it in `tools/ffmpeg` inside the tools directory.
+
+**App updates** are announced by a banner in the app. The app never installs a new version silently.
+
+| Platform | What "Update now" does |
+|---|---|
+| Windows | Downloads the release, closes the app, replaces the program files and restarts it. Files the release does not ship (`dlp.exe`, `ffmpeg/`, history) are left alone. If the install directory needs administrator rights a UAC prompt is shown; if it is declined, or the update fails, the previous version is kept and the release page is offered instead. |
+| macOS, Linux | Opens the release page in the browser. Download the new archive and install it manually. |
+
+An update is refused while downloads are running; finish or cancel them first.
+
+Updating yt-dlp or the app does not touch your data: downloads, history, settings and Spotify credentials are kept.
 
 ---
 
@@ -73,7 +102,7 @@ flutter pub get
 
 ```
 YouSpotDL-App/
-  dlp.exe          ← rename yt-dlp.exe to dlp.exe  (download from github.com/yt-dlp/yt-dlp)
+  dlp.exe          ← legacy fallback: rename yt-dlp.exe to dlp.exe  (the app manages yt-dlp itself, see Updates)
   ffmpeg.exe       ← or keep as ffmpeg/ folder with ffmpeg.exe inside
 ```
 

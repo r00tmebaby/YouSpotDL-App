@@ -35,11 +35,15 @@ jobs:
         run: flutter pub get
       - name: Build macOS executable
         run: flutter build macos --release
+      # Packed here because upload-artifact drops execute bits and symlinks.
+      - name: Package macOS bundle
+        run: tar -czf YouSpotDL-macos.tar.gz -C build/macos/Build/Products/Release YouSpotDL.app
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
           name: macos-executable
-          path: build/macos/Build/Products/Release/
+          path: YouSpotDL-macos.tar.gz
+          if-no-files-found: error
 
   build-linux:
     runs-on: ubuntu-latest
@@ -56,11 +60,15 @@ jobs:
         run: flutter pub get
       - name: Build Linux executable
         run: flutter build linux --release
+      # Packed here because upload-artifact drops execute bits and symlinks.
+      - name: Package Linux bundle
+        run: tar -czf YouSpotDL-linux.tar.gz -C build/linux/x64/release/bundle .
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
           name: linux-executable
-          path: build/linux/x64/release/bundle/
+          path: YouSpotDL-linux.tar.gz
+          if-no-files-found: error
 
   release:
     needs: [build-windows, build-macos, build-linux]
@@ -70,6 +78,20 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v5
+      - name: Verify tag matches app version
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          app_version=$(sed -n "s/^const String appVersion = '\([^']*\)';.*/\1/p" lib/core/constants.dart)
+          pubspec_version=$(sed -n 's/^version: *\([^+ ]*\).*/\1/p' pubspec.yaml)
+          if [ -z "$app_version" ] || [ -z "$pubspec_version" ]; then
+            echo "::error::Could not read appVersion from lib/core/constants.dart or version from pubspec.yaml"
+            exit 1
+          fi
+          if [ "$tag" != "$app_version" ] || [ "$tag" != "$pubspec_version" ]; then
+            echo "::error::Tag v$tag must match appVersion '$app_version' in lib/core/constants.dart and pubspec.yaml version '$pubspec_version'"
+            exit 1
+          fi
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -79,12 +101,9 @@ jobs:
           pushd artifacts/windows-executable
           zip -r ../../YouSpotDL-windows.zip .
           popd
-          pushd artifacts/macos-executable
-          tar -czf ../../YouSpotDL-macos.tar.gz YouSpotDL.app
-          popd
-          pushd artifacts/linux-executable
-          tar -czf ../../YouSpotDL-linux.tar.gz .
-          popd
+          # The macOS and Linux tarballs were built in their jobs and ship as-is.
+          mv artifacts/macos-executable/YouSpotDL-macos.tar.gz .
+          mv artifacts/linux-executable/YouSpotDL-linux.tar.gz .
       - name: Create or update GitHub release
         uses: softprops/action-gh-release@v2
         with:

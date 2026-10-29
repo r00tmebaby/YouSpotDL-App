@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import '../core/constants.dart';
 import '../core/theme.dart';
 import 'app_logo.dart';
+import 'update_banner.dart';
 
 class AppShell extends StatelessWidget {
   final Widget child;
@@ -69,7 +71,7 @@ class AppShell extends StatelessWidget {
                       const AppLogo(size: 20),
                       const SizedBox(width: 8),
                       Text(
-                        'v1.0.0',
+                        'v$appVersion',
                         style: TextStyle(
                           color: AppTheme.textSecondary.withValues(alpha: 0.5),
                           fontSize: 11,
@@ -86,7 +88,14 @@ class AppShell extends StatelessWidget {
           Container(width: 1, color: AppTheme.surfaceVariant),
 
           // Content
-          Expanded(child: child),
+          Expanded(
+            child: Column(
+              children: [
+                const UpdateBanner(),
+                Expanded(child: child),
+              ],
+            ),
+          ),
         ],
       ),
     );

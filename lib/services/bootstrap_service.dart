@@ -1,6 +1,13 @@
 import 'dart:io';
-import 'package:path/path.dart' as pathlib;
+
 import 'package:archive/archive_io.dart';
+import 'package:path/path.dart' as pathlib;
+
+import 'download_service.dart';
+import 'http_download.dart';
+import 'ytdlp_update_service.dart';
+
+export 'http_download.dart' show DownloadProgress;
 
 // ── Data types ─────────────────────────────────────────────────────────────
 
@@ -13,66 +20,29 @@ class ToolStatus {
   bool get allReady => ytdlpFound && ffmpegFound;
 }
 
-class DownloadProgress {
-  final double fraction; // 0.0 → 1.0
-  final String label;    // e.g. "Downloading yt-dlp…"
-
-  const DownloadProgress(this.fraction, this.label);
-}
-
 // ── Service ────────────────────────────────────────────────────────────────
 
+/// First-run setup and manual downloads of the external tools.
+///
+/// Everything is written to the user-writable [toolsDir], so setup and updates
+/// work even when the app itself is installed in a read-only location such as
+/// Program Files.
 class BootstrapService {
+  BootstrapService({required this.toolsDir, YtdlpUpdateService? ytdlp})
+      : _ytdlp = ytdlp ?? YtdlpUpdateService(toolsDir: toolsDir);
+
+  final String toolsDir;
+  final YtdlpUpdateService _ytdlp;
+
   static bool get _isWin => Platform.isWindows;
 
-  // ── Tool directory ────────────────────────────────────────────────────────
-  /// Where downloaded tools are placed.
-  /// Uses the exe directory so DownloadService (which checks there first)
-  /// always finds them immediately — both in dev and release builds.
-  static String get toolDir => pathlib.dirname(Platform.resolvedExecutable);
+  DownloadService get _lookup => DownloadService(managedToolsDir: toolsDir);
 
-  // ── Status checks — mirror DownloadService._findYtdlp() walk-up logic ────
+  bool get ytdlpAvailable => _lookup.isAvailable;
 
-  static bool get ytdlpAvailable {
-    final names = _isWin ? ['dlp.exe', 'yt-dlp.exe'] : ['yt-dlp', 'dlp'];
-    var dir = pathlib.dirname(Platform.resolvedExecutable);
-    for (var i = 0; i < 10; i++) {
-      for (final name in names) {
-        if (File(pathlib.join(dir, name)).existsSync()) return true;
-      }
-      final parent = pathlib.dirname(dir);
-      if (parent == dir) break;
-      dir = parent;
-    }
-    final whichCmd = _isWin ? 'where' : 'which';
-    for (final name in ['yt-dlp', 'dlp']) {
-      try { if (Process.runSync(whichCmd, [name]).exitCode == 0) return true; }
-      catch (_) {}
-    }
-    return false;
-  }
+  bool get ffmpegAvailable => _lookup.ffmpegAvailable;
 
-  static bool get ffmpegAvailable {
-    final bin = _isWin ? 'ffmpeg.exe' : 'ffmpeg';
-    var dir = pathlib.dirname(Platform.resolvedExecutable);
-    for (var i = 0; i < 12; i++) {
-      for (final candidate in [
-        pathlib.join(dir, bin),
-        pathlib.join(dir, 'ffmpeg', bin),
-        pathlib.join(dir, 'ffmpeg', 'bin', bin),
-      ]) {
-        if (File(candidate).existsSync()) return true;
-      }
-      final parent = pathlib.dirname(dir);
-      if (parent == dir) break;
-      dir = parent;
-    }
-    try { if (Process.runSync(_isWin ? 'where' : 'which', ['ffmpeg']).exitCode == 0) return true; }
-    catch (_) {}
-    return false;
-  }
-
-  static ToolStatus checkStatus() => ToolStatus(
+  ToolStatus checkStatus() => ToolStatus(
         ytdlpFound: ytdlpAvailable,
         ffmpegFound: ffmpegAvailable,
       );
@@ -83,31 +53,14 @@ class BootstrapService {
 
   // ── yt-dlp download ───────────────────────────────────────────────────────
 
-  static String get _ytdlpUrl {
-    if (_isWin) return 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe';
-    if (Platform.isMacOS) return 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos';
-    return 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp';
-  }
-
-  Stream<DownloadProgress> downloadYtdlp() async* {
-    final dest = pathlib.join(toolDir, _isWin ? 'yt-dlp.exe' : 'yt-dlp');
-    yield* _downloadFile(_ytdlpUrl, dest, 'Downloading yt-dlp');
-    if (!_isWin) {
-      await Process.run('chmod', ['+x', dest]);
-    }
-  }
-
-  /// Force update (re-download) yt-dlp, even if already present.
-  Stream<DownloadProgress> updateYtdlp() async* {
-    // Overwrite the existing binary with the latest version.
-    yield* downloadYtdlp();
-  }
+  /// Installs the latest yt-dlp into the tools directory. Shares its code
+  /// path with the automatic updater.
+  Stream<DownloadProgress> downloadYtdlp() => _ytdlp.install();
 
   // ── ffmpeg download (Windows only) ───────────────────────────────────────
 
-  // yt-dlp's shared Windows build — ~96 MB compressed.
-  // "Shared" means ffmpeg.exe + DLLs; all go into toolDir/ffmpeg/ so the
-  // existing _findFfmpeg() path (toolDir/ffmpeg/ffmpeg.exe) finds it.
+  // yt-dlp's shared Windows build, about 96 MB compressed. "Shared" means
+  // ffmpeg.exe plus DLLs; all of bin/ goes into <toolsDir>/ffmpeg/.
   static const _ffmpegZipUrl =
       'https://github.com/yt-dlp/FFmpeg-Builds/releases/latest/download/'
       'ffmpeg-master-latest-win64-gpl-shared.zip';
@@ -120,95 +73,46 @@ class BootstrapService {
       );
     }
 
-    final zipPath = pathlib.join(toolDir, '_ffmpeg_tmp.zip');
+    final zipPath = pathlib.join(toolsDir, '_ffmpeg_tmp.zip');
 
     // Step 1: download zip (0 → 85 %)
-    await for (final p in _downloadFile(_ffmpegZipUrl, zipPath, 'Downloading ffmpeg')) {
+    await for (final p in downloadToFile(_ffmpegZipUrl, zipPath, 'Downloading ffmpeg')) {
       yield DownloadProgress(p.fraction * 0.85, p.label);
     }
 
-    // Step 2: extract the bin/ folder from the zip into toolDir/ffmpeg/
+    // Step 2: extract the bin/ folder from the zip into toolsDir/ffmpeg/
     yield const DownloadProgress(0.87, 'Extracting ffmpeg…');
 
-    final outDir = Directory(pathlib.join(toolDir, 'ffmpeg'));
+    final outDir = Directory(pathlib.join(toolsDir, 'ffmpeg'));
     await outDir.create(recursive: true);
 
-    // Use InputFileStream for memory-efficient extraction (avoids loading 96 MB at once).
+    // InputFileStream keeps memory flat instead of loading 96 MB at once.
     final inputStream = InputFileStream(zipPath);
-    final archive = ZipDecoder().decodeStream(inputStream);
-    int extracted = 0;
-
-    for (final entry in archive) {
-      if (!entry.isFile) continue;
-      // Zip path: "ffmpeg-master-latest-win64-gpl-shared/bin/ffmpeg.exe"
-      // → keep only the filename, write to toolDir/ffmpeg/filename
-      final segments = entry.name.replaceAll('\\', '/').split('/');
-      if (segments.length < 2) continue;
-      final parent = segments[segments.length - 2]; // "bin"
-      if (parent != 'bin') continue;
-
-      final fileName = segments.last;
-      final outPath = pathlib.join(outDir.path, fileName);
-      final content = entry.content;
-      if (content is List<int>) {
-        File(outPath).writeAsBytesSync(content);
+    var extracted = 0;
+    try {
+      final archive = ZipDecoder().decodeStream(inputStream);
+      for (final entry in archive) {
+        if (!entry.isFile) continue;
+        // Zip path: "ffmpeg-master-latest-win64-gpl-shared/bin/ffmpeg.exe"
+        final segments = entry.name.replaceAll('\\', '/').split('/');
+        if (segments.length < 2 || segments[segments.length - 2] != 'bin') {
+          continue;
+        }
+        File(pathlib.join(outDir.path, segments.last))
+            .writeAsBytesSync(entry.content);
         extracted++;
       }
+    } finally {
+      inputStream.closeSync();
+      try {
+        File(zipPath).deleteSync();
+      } catch (_) {}
     }
-    inputStream.closeSync();
-
-    try { File(zipPath).deleteSync(); } catch (_) {}
 
     if (extracted == 0) throw Exception('No files extracted from ffmpeg zip.');
     yield const DownloadProgress(1.0, 'ffmpeg ready');
   }
 
-  /// Force update (re-download) ffmpeg, even if already present (Windows only).
-  Stream<DownloadProgress> updateFfmpeg() async* {
-    // Overwrite the existing ffmpeg binaries with the latest version.
-    yield* downloadFfmpeg();
-  }
-
-  // ── Internal HTTP downloader ─────────────────────────────────────────────
-  // Uses dart:io HttpClient so it follows 302 redirects automatically.
-  // (GitHub releases always redirect to a CDN — http.Client.send() would fail.)
-
-  Stream<DownloadProgress> _downloadFile(
-    String url,
-    String dest,
-    String label,
-  ) async* {
-    final httpClient = HttpClient();
-    try {
-      final request = await httpClient.getUrl(Uri.parse(url));
-      request.followRedirects = true;
-      request.maxRedirects = 10;
-
-      final response = await request.close();
-      if (response.statusCode != 200) {
-        throw Exception('HTTP ${response.statusCode} while downloading $label');
-      }
-
-      final total = response.contentLength; // -1 if unknown
-      var received = 0;
-
-      await Directory(pathlib.dirname(dest)).create(recursive: true);
-      final sink = File(dest).openWrite();
-
-      await for (final chunk in response) {
-        sink.add(chunk);
-        received += chunk.length;
-        final mb = (received / 1048576).toStringAsFixed(1);
-        final totalMb = total > 0 ? ' / ${(total / 1048576).toStringAsFixed(1)} MB' : '';
-        yield DownloadProgress(
-          total > 0 ? received / total : (received / (30 * 1048576)).clamp(0.0, 0.99),
-          '$label ($mb MB$totalMb)',
-        );
-      }
-      await sink.close();
-      yield DownloadProgress(1.0, '$label — done');
-    } finally {
-      httpClient.close(force: true);
-    }
-  }
+  /// Re-downloads ffmpeg even if already present (Windows only).
+  Stream<DownloadProgress> updateFfmpeg() => downloadFfmpeg();
 }

@@ -4,11 +4,10 @@ import 'package:file_picker/file_picker.dart';
 import 'dart:io' show Platform;
 import '../core/theme.dart';
 import '../core/constants.dart';
-import '../models/settings.dart';
 import '../providers/settings_provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/download_provider.dart';
-import '../services/bootstrap_service.dart';
+import '../providers/update_provider.dart';
 
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
@@ -156,6 +155,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                     ElevatedButton(
                       onPressed: () async {
                         await _save();
+                        if (!context.mounted) return;
                         if (_clientIdCtrl.text.isEmpty) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(content: Text('Enter Client ID first')),
@@ -281,6 +281,7 @@ class _ToolsInfoCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final toolsAsync = ref.watch(toolsInfoProvider);
+    final ytdlpUpdate = ref.watch(ytdlpUpdaterProvider);
     final os = Platform.operatingSystem; // 'windows' | 'macos' | 'linux'
     final osBadge = {'windows': '🪟 Windows', 'macos': '🍎 macOS', 'linux': '🐧 Linux'}[os] ?? os;
 
@@ -311,7 +312,7 @@ class _ToolsInfoCard extends ConsumerWidget {
                   Text('Detecting tools…', style: TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
                 ],
               ),
-              error: (_, __) => const Text('Could not detect tools',
+              error: (_, _) => const Text('Could not detect tools',
                   style: TextStyle(color: AppTheme.error, fontSize: 13)),
               data: (tools) {
                 final ytVer  = tools['ytdlp'];
@@ -328,8 +329,8 @@ class _ToolsInfoCard extends ConsumerWidget {
                       path: ytPath,
                       hint: ytVer == null
                           ? (os == 'windows'
-                              ? 'Place dlp.exe next to the app'
-                              : 'Run: pip install yt-dlp')
+                              ? 'Use the Update yt-dlp button below to install it'
+                              : 'Use the Update yt-dlp button below or run: pip install yt-dlp')
                           : null,
                     ),
                     const SizedBox(height: 10),
@@ -355,25 +356,18 @@ class _ToolsInfoCard extends ConsumerWidget {
                           child: ElevatedButton.icon(
                             icon: const Icon(Icons.system_update_alt),
                             label: const Text('Update yt-dlp'),
-                            onPressed: () async {
-                              final messenger = ScaffoldMessenger.of(context);
-                              showDialog(
-                                context: context,
-                                barrierDismissible: false,
-                                builder: (ctx) => const Center(child: CircularProgressIndicator()),
-                              );
-                              try {
-                                await for (final p in BootstrapService().updateYtdlp()) {
-                                  // Optionally, show progress in a better dialog
-                                }
-                                messenger.showSnackBar(const SnackBar(content: Text('yt-dlp updated!')));
-                                ref.invalidate(toolsInfoProvider);
-                              } catch (e) {
-                                messenger.showSnackBar(SnackBar(content: Text('yt-dlp update failed: $e')));
-                              } finally {
-                                Navigator.of(context, rootNavigator: true).pop();
-                              }
-                            },
+                            onPressed: ytdlpUpdate.isBusy
+                                ? null
+                                : () async {
+                                    final messenger = ScaffoldMessenger.of(context);
+                                    final updater = ref.read(ytdlpUpdaterProvider.notifier);
+                                    await updater.checkAndUpdate(force: true);
+                                    ref.invalidate(toolsInfoProvider);
+                                    final message = ref.read(ytdlpUpdaterProvider).message;
+                                    if (message != null) {
+                                      messenger.showSnackBar(SnackBar(content: Text(message)));
+                                    }
+                                  },
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -390,21 +384,37 @@ class _ToolsInfoCard extends ConsumerWidget {
                                   builder: (ctx) => const Center(child: CircularProgressIndicator()),
                                 );
                                 try {
-                                  await for (final p in BootstrapService().updateFfmpeg()) {
-                                    // Optionally, show progress in a better dialog
-                                  }
-                                  messenger.showSnackBar(const SnackBar(content: Text('ffmpeg updated!')));
-                                  ref.invalidate(toolsInfoProvider);
+                                  await ref.read(bootstrapServiceProvider).updateFfmpeg().drain<void>();
+                                  ref.read(downloadServiceProvider).resetToolCache();
+                                  messenger.showSnackBar(const SnackBar(content: Text('ffmpeg updated')));
+                                  ref
+                                    ..invalidate(toolsInfoProvider)
+                                    ..invalidate(toolStatusProvider);
                                 } catch (e) {
                                   messenger.showSnackBar(SnackBar(content: Text('ffmpeg update failed: $e')));
                                 } finally {
-                                  Navigator.of(context, rootNavigator: true).pop();
+                                  if (context.mounted) {
+                                    Navigator.of(context, rootNavigator: true).pop();
+                                  }
                                 }
                               },
                             ),
                           ),
                       ],
                     ),
+                    if (ytdlpUpdate.phase == YtdlpUpdatePhase.downloading) ...[
+                      const SizedBox(height: 10),
+                      LinearProgressIndicator(value: ytdlpUpdate.fraction, minHeight: 3),
+                    ],
+                    if (ytdlpUpdate.isBusy && ytdlpUpdate.message != null) ...[
+                      const SizedBox(height: 6),
+                      Text(ytdlpUpdate.message!,
+                          style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11)),
+                    ],
+                    const SizedBox(height: 12),
+                    const Divider(height: 1),
+                    const SizedBox(height: 12),
+                    const _AppVersionRow(),
                   ],
                 );
               },
@@ -412,6 +422,104 @@ class _ToolsInfoCard extends ConsumerWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Shows the running app version, the latest known release and the manual
+/// update controls.
+class _AppVersionRow extends ConsumerWidget {
+  const _AppVersionRow();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(appUpdateProvider);
+    final notifier = ref.read(appUpdateProvider.notifier);
+    final latest = state.release?.version;
+    final showMessage = state.message != null &&
+        (state.phase == AppUpdatePhase.upToDate || state.phase == AppUpdatePhase.failed);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.info_outline, size: 16, color: AppTheme.textSecondary),
+            const SizedBox(width: 8),
+            const Text('App version',
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                )),
+            const SizedBox(width: 8),
+            _VersionBadge(text: 'v$appVersion', color: AppTheme.success),
+            if (latest != null && latest != appVersion) ...[
+              const SizedBox(width: 8),
+              _VersionBadge(text: 'latest v$latest', color: AppTheme.primary),
+            ],
+          ],
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            OutlinedButton(
+              onPressed: state.isBusy ? null : () => notifier.check(manual: true),
+              child: const Text('Check for updates'),
+            ),
+            if (state.phase == AppUpdatePhase.available) ...[
+              const SizedBox(width: 12),
+              ElevatedButton(
+                onPressed: notifier.startUpdate,
+                child: Text(notifier.supportsInPlaceUpdate
+                    ? 'Update now'
+                    : 'Open release page'),
+              ),
+            ],
+            if (state.phase == AppUpdatePhase.checking) ...[
+              const SizedBox(width: 12),
+              const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+            ],
+          ],
+        ),
+        if (state.phase == AppUpdatePhase.available &&
+            !notifier.supportsInPlaceUpdate) ...[
+          const SizedBox(height: 6),
+          const Text(
+              'On this platform the new version is installed manually '
+              'from the release page.',
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: 11)),
+        ],
+        if (showMessage) ...[
+          const SizedBox(height: 6),
+          Text(state.message!,
+              style: TextStyle(
+                color: state.phase == AppUpdatePhase.failed
+                    ? AppTheme.error
+                    : AppTheme.textSecondary,
+                fontSize: 11,
+              )),
+        ],
+      ],
+    );
+  }
+}
+
+class _VersionBadge extends StatelessWidget {
+  final String text;
+  final Color color;
+
+  const _VersionBadge({required this.text, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(text, style: TextStyle(color: color, fontSize: 11)),
     );
   }
 }

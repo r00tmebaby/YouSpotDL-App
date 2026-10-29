@@ -62,7 +62,7 @@ class _VideoInfoCardState extends State<VideoInfoCard> {
                       width: 160,
                       height: 90,
                       fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Container(
+                      errorBuilder: (_, _, _) => Container(
                         width: 160,
                         height: 90,
                         decoration: BoxDecoration(
@@ -111,6 +111,14 @@ class _VideoInfoCardState extends State<VideoInfoCard> {
             const SizedBox(height: 20),
 
             // Format selection
+            RadioGroup<DownloadFormat>(
+              groupValue: _selectedFormat,
+              onChanged: (f) {
+                if (!downloading && f != null) setState(() => _selectedFormat = f);
+              },
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
             const Text(
               'Audio',
               style: TextStyle(
@@ -134,6 +142,9 @@ class _VideoInfoCardState extends State<VideoInfoCard> {
             ),
             const SizedBox(height: 6),
             ...DownloadFormat.videoFormats.map((f) => _buildRadioTile(f, downloading)),
+                ],
+              ),
+            ),
 
             const SizedBox(height: 20),
 
@@ -227,12 +238,7 @@ class _VideoInfoCardState extends State<VideoInfoCard> {
           children: [
             Radio<DownloadFormat>(
               value: format,
-              groupValue: _selectedFormat,
-              onChanged: disabled
-                  ? null
-                  : (f) {
-                      if (f != null) setState(() => _selectedFormat = f);
-                    },
+              enabled: !disabled,
               activeColor: AppTheme.primary,
               visualDensity: VisualDensity.compact,
             ),

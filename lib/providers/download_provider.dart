@@ -12,10 +12,19 @@ import '../models/video_info.dart';
 import '../services/spotify_api_service.dart';
 import '../services/download_service.dart';
 import '../services/bootstrap_service.dart';
+import '../services/ytdlp_error.dart';
+import 'update_provider.dart';
 
 final spotifyApiProvider = Provider<SpotifyApiService>((ref) => SpotifyApiService());
-final downloadServiceProvider = Provider<DownloadService>((ref) => DownloadService());
-final bootstrapServiceProvider = Provider<BootstrapService>((ref) => BootstrapService());
+final downloadServiceProvider = Provider<DownloadService>(
+  (ref) => DownloadService(managedToolsDir: ref.watch(toolsDirProvider)),
+);
+final bootstrapServiceProvider = Provider<BootstrapService>(
+  (ref) => BootstrapService(
+    toolsDir: ref.watch(toolsDirProvider),
+    ytdlp: ref.watch(ytdlpUpdateServiceProvider),
+  ),
+);
 
 /// Live tool-status check — invalidate after auto-setup to refresh.
 /// Uses DownloadService (same as toolsInfoProvider) so home page banner
@@ -198,6 +207,13 @@ class DownloadNotifier extends StateNotifier<DownloadState> {
   final SpotifyApiService _spotifyApi;
   final DownloadService _downloadService;
   final _uuid = const Uuid();
+
+  /// Minimum gap between forced yt-dlp updates triggered by failed downloads.
+  static const _forcedUpdateCooldown = Duration(minutes: 30);
+
+  DateTime? _lastForcedUpdate;
+  bool _lastForcedUpdateInstalled = false;
+  Future<bool>? _forcedUpdateInFlight;
 
   DownloadNotifier(this._ref, this._spotifyApi, this._downloadService) : super(const DownloadState());
 
@@ -406,19 +422,18 @@ class DownloadNotifier extends StateNotifier<DownloadState> {
   Future<void> _processVideo(String taskId, String url, String outputDir, DownloadFormat format) async {
     String? downloadError;
 
-    await for (final progress in _downloadService.downloadVideo(
-      url: url,
-      outputDir: outputDir,
-      formatSelector: format.ytDlpSelector,
-      outputExt: format.outputExt,
-      audioOnly: format.audioOnly,
-      index: 0,
-    )) {
-      _updateSongProgress(taskId, progress);
-      if (progress.status == SongDownloadStatus.error) {
-        downloadError = progress.error ?? 'Video download failed.';
-      }
-    }
+    await _runWithRetry(
+      taskId,
+      () => _downloadService.downloadVideo(
+        url: url,
+        outputDir: outputDir,
+        formatSelector: format.ytDlpSelector,
+        outputExt: format.outputExt,
+        audioOnly: format.audioOnly,
+        index: 0,
+      ),
+      onError: (progress) => downloadError = progress.error ?? 'Video download failed.',
+    );
 
     // Surface the error to the user via the global error state (triggers dialog)
     if (downloadError != null && mounted) {
@@ -458,14 +473,77 @@ class DownloadNotifier extends StateNotifier<DownloadState> {
 
   Future<void> _processSong(String taskId, Song song, String outputFolder) async {
     final queryStr = song.query.isNotEmpty ? song.query : '${song.title} - ${song.artist}';
-    await for (final progress in _downloadService.downloadSong(
-      query: queryStr,
-      outputDir: outputFolder,
-      index: song.index,
-      displayTitle: song.title,
-    )) {
-      _updateSongProgress(taskId, progress);
+    await _runWithRetry(
+      taskId,
+      () => _downloadService.downloadSong(
+        query: queryStr,
+        outputDir: outputFolder,
+        index: song.index,
+        displayTitle: song.title,
+      ),
+    );
+  }
+
+  /// Consumes one download attempt and forwards its progress to the task.
+  ///
+  /// When the attempt ends with an error that points at an outdated yt-dlp,
+  /// the error is withheld, yt-dlp is force-updated and the download is run
+  /// once more. A second failure, or a failed update, is reported as usual.
+  /// [onError] receives the final error progress event, if any.
+  Future<void> _runWithRetry(
+    String taskId,
+    Stream<SongDownloadProgress> Function() start, {
+    void Function(SongDownloadProgress progress)? onError,
+  }) async {
+    for (var attempt = 0; ; attempt++) {
+      SongDownloadProgress? withheld;
+      await for (final progress in start()) {
+        final isError = progress.status == SongDownloadStatus.error;
+        if (isError && attempt == 0 && isStaleYtdlpError(progress.error ?? '')) {
+          withheld = progress;
+          continue;
+        }
+        _updateSongProgress(taskId, progress);
+        if (isError) onError?.call(progress);
+      }
+      if (withheld == null) return;
+
+      final updated = await _refreshYtdlp();
+      if (updated && mounted) continue;
+
+      _updateSongProgress(taskId, withheld);
+      onError?.call(withheld);
+      return;
     }
+  }
+
+  /// Force-updates yt-dlp and reports whether a new binary was installed.
+  ///
+  /// Callers arriving while an update runs join it. A fresh update is started
+  /// at most once per [_forcedUpdateCooldown]; inside that window the outcome
+  /// of the previous update is returned instead.
+  Future<bool> _refreshYtdlp() {
+    final inFlight = _forcedUpdateInFlight;
+    if (inFlight != null) return inFlight;
+
+    final last = _lastForcedUpdate;
+    if (last != null && DateTime.now().difference(last) < _forcedUpdateCooldown) {
+      return Future.value(_lastForcedUpdateInstalled);
+    }
+
+    _lastForcedUpdate = DateTime.now();
+    return _forcedUpdateInFlight = () async {
+      try {
+        await _ref.read(ytdlpUpdaterProvider.notifier).checkAndUpdate(force: true);
+        _lastForcedUpdateInstalled = _ref.read(ytdlpUpdaterProvider).phase == YtdlpUpdatePhase.installed;
+        return _lastForcedUpdateInstalled;
+      } catch (_) {
+        _lastForcedUpdateInstalled = false;
+        return false;
+      } finally {
+        _forcedUpdateInFlight = null;
+      }
+    }();
   }
 
   void _updateSongProgress(String taskId, SongDownloadProgress progress) {

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../core/theme.dart';
-import '../models/download_task.dart';
 
 class SongListTile extends StatelessWidget {
   final int index;
@@ -86,11 +85,13 @@ class SongListTile extends StatelessWidget {
     if (completed) return const Icon(Icons.check_circle, color: AppTheme.success, size: 20);
     if (isSkipped) return const Icon(Icons.skip_next, color: Colors.amber, size: 20);
     if (hasError) return const Icon(Icons.error, color: AppTheme.error, size: 20);
-    if (isDownloading) return const SizedBox(
-      width: 16,
-      height: 16,
-      child: CircularProgressIndicator(strokeWidth: 2),
-    );
+    if (isDownloading) {
+      return const SizedBox(
+        width: 16,
+        height: 16,
+        child: CircularProgressIndicator(strokeWidth: 2),
+      );
+    }
     return Text(
       '${index + 1}',
       style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),

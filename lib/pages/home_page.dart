@@ -74,7 +74,7 @@ class HomePage extends ConsumerWidget {
             // ── Setup banner (shown when tools are missing) ───────────────
             toolStatus.when(
               loading: () => const SizedBox.shrink(),
-              error: (_, __) => const SizedBox.shrink(),
+              error: (_, _) => const SizedBox.shrink(),
               data: (status) => status.allReady
                   ? const SizedBox.shrink()
                   : _SetupBanner(
@@ -195,7 +195,7 @@ class _SetupDialog extends StatefulWidget {
 }
 
 class _SetupDialogState extends State<_SetupDialog> {
-  final _svc = BootstrapService();
+  late final BootstrapService _svc = widget.ref.read(bootstrapServiceProvider);
 
   double _ytProgress = -1; // -1 = not started, 0..1 = in progress, 2 = done, -2 = error
   double _ffProgress = -1;
@@ -205,8 +205,8 @@ class _SetupDialogState extends State<_SetupDialog> {
   String? _ffError;
   bool _running = false;
   bool get _done =>
-      (_ytProgress == 2 || _ytProgress == -2 || _ytProgress == -1 && BootstrapService.ytdlpAvailable) &&
-      (_ffProgress == 2 || _ffProgress == -2 || _ffProgress == -1 && BootstrapService.ffmpegAvailable);
+      (_ytProgress == 2 || _ytProgress == -2 || _ytProgress == -1 && _svc.ytdlpAvailable) &&
+      (_ffProgress == 2 || _ffProgress == -2 || _ffProgress == -1 && _svc.ffmpegAvailable);
 
   @override
   void initState() {
@@ -218,13 +218,13 @@ class _SetupDialogState extends State<_SetupDialog> {
     setState(() => _running = true);
     final futures = <Future>[];
 
-    if (!BootstrapService.ytdlpAvailable) {
+    if (!_svc.ytdlpAvailable) {
       futures.add(_runYtdlp());
     } else {
       setState(() { _ytProgress = 2; _ytLabel = 'Already installed'; });
     }
 
-    if (!BootstrapService.ffmpegAvailable) {
+    if (!_svc.ffmpegAvailable) {
       if (_svc.canAutoDownloadFfmpeg) {
         futures.add(_runFfmpeg());
       } else {
@@ -248,6 +248,7 @@ class _SetupDialogState extends State<_SetupDialog> {
         if (!mounted) return;
         setState(() { _ytProgress = p.fraction; _ytLabel = p.label; });
       }
+      widget.ref.read(downloadServiceProvider).resetToolCache();
       if (mounted) setState(() { _ytProgress = 2; _ytLabel = 'yt-dlp installed ✓'; });
     } catch (e) {
       if (mounted) setState(() { _ytProgress = -2; _ytError = e.toString(); });

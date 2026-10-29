@@ -3,8 +3,16 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 import '../models/video_info.dart';
+import 'tool_paths.dart';
 
 class DownloadService {
+  /// [managedToolsDir] is the user-writable tools directory kept current by
+  /// the updater. Binaries found there take precedence over copies placed
+  /// next to the executable and over PATH.
+  DownloadService({this.managedToolsDir});
+
+  final String? managedToolsDir;
+
   String? _ytdlpPath;
   String? _ffmpegPath;
 
@@ -12,30 +20,28 @@ class DownloadService {
   static bool get _isWindows => Platform.isWindows;
   static String get _whichCmd => _isWindows ? 'where' : 'which';
 
-  /// Find yt-dlp executable — cross-platform (Windows / macOS / Linux).
+  /// Forgets the resolved tool paths so the next lookup picks up a binary
+  /// that was installed or replaced since.
+  void resetToolCache() {
+    _ytdlpPath = null;
+    _ffmpegPath = null;
+  }
+
+  /// Finds yt-dlp: the managed tools dir first, then the legacy copies next
+  /// to the executable (walking up for the dev layout), then PATH.
   String _findYtdlp() {
     if (_ytdlpPath != null && File(_ytdlpPath!).existsSync()) return _ytdlpPath!;
 
-    // Candidate binary names in priority order
-    final names = _isWindows
-        ? ['dlp.exe', 'yt-dlp.exe']
-        : ['yt-dlp', 'dlp', 'yt-dlp.sh'];
-
-    final exeDir = p.dirname(Platform.resolvedExecutable);
-
-    // Walk up the directory tree (covers dev layout and installed app)
-    var dir = exeDir;
-    for (var i = 0; i < 10; i++) {
-      for (final name in names) {
-        final candidate = p.join(dir, name);
-        if (File(candidate).existsSync()) {
-          _ytdlpPath = candidate;
-          return _ytdlpPath!;
-        }
+    final candidates = ToolPaths.ytdlpCandidates(
+      managedDir: managedToolsDir,
+      exeDir: p.dirname(Platform.resolvedExecutable),
+      isWindows: _isWindows,
+    );
+    for (final candidate in candidates) {
+      if (File(candidate).existsSync()) {
+        _ytdlpPath = candidate;
+        return _ytdlpPath!;
       }
-      final parent = p.dirname(dir);
-      if (parent == dir) break;
-      dir = parent;
     }
 
     // Fallback: system PATH
@@ -54,7 +60,7 @@ class DownloadService {
 
     throw Exception(
       'yt-dlp not found.\n'
-      '• Windows : place dlp.exe or yt-dlp.exe next to the app\n'
+      '• Any OS  : Settings > System Tools > Update yt-dlp downloads it\n'
       '• macOS   : brew install yt-dlp  OR  pip install yt-dlp\n'
       '• Linux   : pip install yt-dlp   OR  sudo apt install yt-dlp',
     );
@@ -70,19 +76,19 @@ class DownloadService {
 
     final exeDir = p.dirname(Platform.resolvedExecutable);
 
+    for (final candidate in ToolPaths.ffmpegCandidates(
+      managedDir: managedToolsDir,
+      exeDir: exeDir,
+      isWindows: _isWindows,
+    )) {
+      if (File(candidate).existsSync()) {
+        _ffmpegPath = p.dirname(candidate);
+        return _ffmpegPath!;
+      }
+    }
+
     var dir = exeDir;
     for (var i = 0; i < 12; i++) {
-      for (final candidate in [
-        p.join(dir, binName),
-        p.join(dir, 'ffmpeg', binName),
-        p.join(dir, 'ffmpeg', 'bin', binName),
-      ]) {
-        if (File(candidate).existsSync()) {
-          _ffmpegPath = p.dirname(candidate);
-          return _ffmpegPath!;
-        }
-      }
-
       // Recursively walk any 'ffmpeg' subfolder (handles versioned zip extraction)
       final ffmpegSubdir = Directory(p.join(dir, 'ffmpeg'));
       if (ffmpegSubdir.existsSync()) {
